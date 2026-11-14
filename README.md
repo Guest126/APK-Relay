@@ -4,7 +4,7 @@
 
 ## Overview
 
-Pass an APK to the Android installer without an app screen or launcher icon.
+Receives APK files opened from apps without install permission and relays them to the standard Android package installer using its own granted permission, enabling one-stop installation. This app has no launcher icon or main screen.
 
 Android 8.0 or later. Standalone APKs only.
 
@@ -12,7 +12,7 @@ Android 8.0 or later. Standalone APKs only.
 
 - Open or share an APK and choose **APK Relay**.
 - On first use, allow installation from this source, then return to continue.
-- Confirm installation in Android.
+- Install using Android’s system package installer.
 
 ## Build
 
@@ -24,7 +24,9 @@ Build with JDK 17 and Android SDK 35:
 
 Sign the generated APK before installing or distributing it.
 
-## Sharing APKs in ChatGPT
+## Notes
+
+**Testing with the ChatGPT app**
 
 | Result | Link example |
 | --- | --- |

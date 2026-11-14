@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name" translatable="false">APK Relay</string>
+    <string name="file_required">Open or share an APK file with APK Relay.</string>
+    <string name="read_failed">Could not read the APK. Open the saved file again and choose APK Relay.</string>
+    <string name="invalid_apk">This file is not a supported standalone APK.</string>
+    <string name="install_failed">Could not open the Android installer.</string>
+    <string name="permission_required">Allow APK Relay to install unknown apps, then open the APK again.</string>
+</resources>

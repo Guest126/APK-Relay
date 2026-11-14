@@ -1,0 +1,7 @@
+<resources>
+    <string name="file_required">APKファイルを開く、または共有してAPK Relayを選んでください。</string>
+    <string name="read_failed">APKを読み取れませんでした。保存したファイルを開き直し、APK Relayを選んでください。</string>
+    <string name="invalid_apk">対応する単体APKではありません。</string>
+    <string name="install_failed">Androidのインストール画面を開けませんでした。</string>
+    <string name="permission_required">APK Relayの「不明なアプリのインストール」を許可してからAPKを開き直してください。</string>
+</resources>
