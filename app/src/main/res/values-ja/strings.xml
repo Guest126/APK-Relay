@@ -3,5 +3,7 @@
     <string name="read_failed">APKを読み取れませんでした。保存したファイルを開き直し、APK Relayを選んでください。</string>
     <string name="invalid_apk">対応する単体APKではありません。</string>
     <string name="install_failed">Androidのインストール画面を開けませんでした。</string>
+    <string name="installation_failed">インストールに失敗しました。</string>
+    <string name="installation_succeeded">インストールが完了しました。</string>
     <string name="permission_required">APK Relayの「不明なアプリのインストール」を許可してからAPKを開き直してください。</string>
 </resources>

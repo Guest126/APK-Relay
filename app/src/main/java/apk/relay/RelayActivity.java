@@ -121,7 +121,14 @@ public final class RelayActivity extends Activity {
         if (request == PERMISSION) {
             if (getPackageManager().canRequestPackageInstalls()) requestInstall();
             else fail(R.string.permission_required);
-        } else if (request == INSTALL) finish();
+        } else if (request == INSTALL) {
+            if (result == RESULT_FIRST_USER) fail(R.string.installation_failed);
+            else {
+                if (result == RESULT_OK)
+                    Toast.makeText(this, R.string.installation_succeeded, Toast.LENGTH_LONG).show();
+                finish();
+            }
+        }
     }
 
     private void fail(int message) {

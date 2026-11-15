@@ -4,5 +4,7 @@
     <string name="read_failed">Could not read the APK. Open the saved file again and choose APK Relay.</string>
     <string name="invalid_apk">This file is not a supported standalone APK.</string>
     <string name="install_failed">Could not open the Android installer.</string>
+    <string name="installation_failed">Installation failed.</string>
+    <string name="installation_succeeded">Installation completed.</string>
     <string name="permission_required">Allow APK Relay to install unknown apps, then open the APK again.</string>
 </resources>
