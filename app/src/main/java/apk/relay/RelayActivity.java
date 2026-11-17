@@ -14,6 +14,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -66,17 +70,19 @@ public final class RelayActivity extends Activity {
     private void stage(Uri uri) {
         worker.execute(() -> {
             File file = null;
+            File partial = null;
             try {
                 File directory = incoming();
-                // Remove old interrupted copies as well as completed APKs.
-                File[] previous = directory.listFiles();
-                if (previous != null) for (File old : previous)
-                    if (old.lastModified() < System.currentTimeMillis() - 7L * 86400000) old.delete();
+                removeAbandonedCopies(directory);
                 file = new File(directory, UUID.randomUUID() + ".apk");
+                partial = new File(directory, file.getName() + ".part");
                 try (InputStream in = getContentResolver().openInputStream(uri);
-                     FileOutputStream out = new FileOutputStream(file)) {
+                     FileOutputStream out = new FileOutputStream(partial);
+                     FileLock lock = out.getChannel().lock()) {
                     ApkCopy.copy(in, out);
                     out.getFD().sync();
+                    // Publish a complete APK before exposing it to the installer.
+                    if (!partial.renameTo(file)) throw new IOException("Cannot publish APK copy");
                 }
                 PackageInfo info = getPackageManager().getPackageArchiveInfo(file.getAbsolutePath(), 0);
                 if (info == null || info.applicationInfo == null || (info.splitNames != null && info.splitNames.length != 0)) {
@@ -86,13 +92,30 @@ public final class RelayActivity extends Activity {
                 }
                 File ready = file;
                 runOnUiThread(() -> {
-                    if (!isDestroyed()) { staged = ready; requestInstall(); }
+                    if (!isDestroyed() && !isFinishing()) { staged = ready; requestInstall(); }
+                    else ready.delete(); // Never handed to an installer.
                 });
             } catch (Exception e) {
+                if (partial != null) partial.delete();
                 if (file != null) file.delete();
                 runOnUiThread(() -> { if (!isDestroyed()) fail(R.string.read_failed); });
             }
         });
+    }
+
+    private static void removeAbandonedCopies(File directory) {
+        File[] previous = directory.listFiles((dir, name) -> name.endsWith(".apk.part"));
+        if (previous == null) return;
+        long cutoff = System.currentTimeMillis() - 7L * 86400000;
+        for (File file : previous) {
+            if (file.lastModified() >= cutoff) continue;
+            // A live copy holds this lock. Completed/legacy APKs are never age-deleted:
+            // another installer may still use them, even after our process was killed.
+            try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE);
+                 FileLock lock = channel.tryLock()) {
+                if (lock != null) file.delete();
+            } catch (IOException | OverlappingFileLockException ignored) { }
+        }
     }
 
     private void requestInstall() {
@@ -112,16 +135,21 @@ public final class RelayActivity extends Activity {
             install.setClipData(ClipData.newRawUri("APK", uri));
             waitingFor = INSTALL;
             startActivityForResult(install, INSTALL);
-        } catch (RuntimeException e) { fail(R.string.install_failed); }
+        } catch (RuntimeException e) {
+            waitingFor = 0; // The child activity was not launched.
+            fail(R.string.install_failed);
+        }
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request != waitingFor) return;
         waitingFor = 0;
         if (request == PERMISSION) {
             if (getPackageManager().canRequestPackageInstalls()) requestInstall();
             else fail(R.string.permission_required);
         } else if (request == INSTALL) {
+            discardStaged(); // The installer has returned, including cancellation.
             if (result == RESULT_FIRST_USER) fail(R.string.installation_failed);
             else {
                 if (result == RESULT_OK)
@@ -132,8 +160,14 @@ public final class RelayActivity extends Activity {
     }
 
     private void fail(int message) {
+        discardStaged();
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
         finish();
+    }
+
+    private void discardStaged() {
+        if (staged == null || waitingFor == INSTALL) return;
+        if (staged.delete() || !staged.exists()) staged = null;
     }
 
     @Override protected void onSaveInstanceState(Bundle out) {
@@ -144,6 +178,8 @@ public final class RelayActivity extends Activity {
 
     @Override protected void onDestroy() {
         worker.shutdownNow();
+        // Keep the saved file on recreation, or while an installer may still need it.
+        if (isFinishing() && !isChangingConfigurations()) discardStaged();
         super.onDestroy();
     }
 }
