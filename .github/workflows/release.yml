@@ -1,0 +1,118 @@
+name: Publish APK Relay
+on:
+  push:
+    branches: [main]
+    paths: [.github/release-request.json]
+permissions:
+  contents: read
+concurrency:
+  group: apk-relay-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Validate explicit release request
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          request = json.loads(Path(".github/release-request.json").read_text())
+          version = request["version"]
+          if not isinstance(version, str) or not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", version):
+              raise SystemExit("Invalid release version")
+          gradle = Path("app/build.gradle").read_text()
+          match = re.search(r"versionName\s+['\"]([^'\"]+)['\"]", gradle)
+          if not match or match[1] != version:
+              raise SystemExit("Release request does not match app versionName")
+          notes = request["notes"]
+          if not isinstance(notes, str) or not notes.strip():
+              raise SystemExit("Release notes are required")
+          Path(os.environ["RUNNER_TEMP"], "release-notes.md").write_text(notes)
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"RELEASE_VERSION={version}\n")
+              output.write(f"RELEASE_TAG=v{version}\n")
+          PY
+      - name: Refuse replacement of an existing release
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::Release already exists; existing assets will not be overwritten."
+            exit 1
+          fi
+      - name: Require the existing signing key
+        env:
+          KEYSTORE: ${{ secrets.APK_RELAY_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.APK_RELAY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.APK_RELAY_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.APK_RELAY_KEY_ALIAS }}
+        run: |
+          test -n "$KEYSTORE"
+          test -n "$STORE_PASSWORD"
+          test -n "$KEY_PASSWORD"
+          test -n "$KEY_ALIAS"
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+      - name: Build release APK
+        run: bash ./gradlew --no-daemon assembleRelease
+      - name: Sign and verify against the published v1.2 APK
+        env:
+          STORE_PASSWORD: ${{ secrets.APK_RELAY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.APK_RELAY_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.APK_RELAY_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          mkdir -p dist "$RUNNER_TEMP/reference"
+          gh release download v1.2 --pattern 'apk-relay-1.2.apk' --dir "$RUNNER_TEMP/reference"
+          reference="$RUNNER_TEMP/reference/apk-relay-1.2.apk"
+          apk="dist/apk-relay-$RELEASE_VERSION.apk"
+          "$tools/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --v4-signing-enabled false --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD --out "$apk" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" verify --verbose --print-certs "$reference" > "$RUNNER_TEMP/reference-certs.txt"
+          "$tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/release-certs.txt"
+          sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' "$RUNNER_TEMP/reference-certs.txt" | sort > "$RUNNER_TEMP/reference-sha256"
+          sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' "$RUNNER_TEMP/release-certs.txt" | sort > "$RUNNER_TEMP/release-sha256"
+          test -s "$RUNNER_TEMP/reference-sha256"
+          cmp "$RUNNER_TEMP/reference-sha256" "$RUNNER_TEMP/release-sha256"
+          "$tools/aapt" dump badging "$reference" > "$RUNNER_TEMP/reference-badging"
+          "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/release-badging"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          def metadata(name):
+              line = (root / name).read_text().splitlines()[0]
+              return dict(re.findall(r"(\w+)='([^']*)'", line))
+          old, new = metadata("reference-badging"), metadata("release-badging")
+          if old["name"] != "apk.relay" or new["name"] != old["name"]:
+              raise SystemExit("Unexpected application ID")
+          if new["versionName"] != os.environ["RELEASE_VERSION"]:
+              raise SystemExit("Unexpected versionName")
+          if int(new["versionCode"]) <= int(old["versionCode"]):
+              raise SystemExit("versionCode must be greater than the published v1.2 APK")
+          PY
+      - name: Package source and checksums
+        run: |
+          git archive --format=zip --prefix=apk-relay/ HEAD -o "dist/apk-relay-$RELEASE_VERSION-source.zip"
+          (cd dist && sha256sum *.apk *.zip > SHA256SUMS.txt)
+      - name: Create and publish release
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --draft dist/*
+          gh release edit "$RELEASE_TAG" --draft=false
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/aligned.apk"
