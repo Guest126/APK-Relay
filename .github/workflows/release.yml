@@ -46,6 +46,8 @@ jobs:
               output.write(f"RELEASE_VERSION={version}\n")
               output.write(f"RELEASE_TAG=v{version}\n")
           PY
+      - name: Refuse replacement of an existing release
+        run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "::error::Release already exists; existing assets will not be overwritten."
             exit 1
