@@ -80,7 +80,7 @@ jobs:
           reference="$RUNNER_TEMP/reference/apk-relay-1.2.apk"
           apk="dist/apk-relay-$RELEASE_VERSION.apk"
           "$tools/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
-          "$tools/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD --out "$apk" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --v4-signing-enabled false --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD --out "$apk" "$RUNNER_TEMP/aligned.apk"
           "$tools/apksigner" verify --verbose --print-certs "$reference" > "$RUNNER_TEMP/reference-certs.txt"
           "$tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/release-certs.txt"
           sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' "$RUNNER_TEMP/reference-certs.txt" | sort > "$RUNNER_TEMP/reference-sha256"
